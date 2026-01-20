@@ -1,125 +1,136 @@
 import os
 import time
 import re
-import requests
-import webbrowser
 
-# ====================================================
-# MASUKKAN LINK PRIVATE SERVER KAMU DI SINI
-# ====================================================
+# ============================================
+# LINK PRIVATE SERVER KAMU
+# ============================================
 PRIVATE_SERVER_LINK = "https://www.roblox.com/share?code=818a0e6bdeb0ca49a0fbfbdfb9453cf6&type=Server"
 
-# ====================================================
-# FUNGSI: Ambil kode Private Server dari URL
-# ====================================================
-def extract_private_server_code(url):
-    m = re.search(r'code=([A-Za-z0-9]+)', url)
+
+# ============================================
+# Ambil kode dari link share
+# ============================================
+def extract_ps_code(url):
+    m = re.search(r"code=([A-Za-z0-9]+)", url)
     return m.group(1) if m else None
 
-# ====================================================
-# Buat deep link roblox://
-# ====================================================
-def build_roblox_deeplink(code):
+
+# ============================================
+# Bangun deeplink roblox
+# ============================================
+def build_deeplink(code):
     return f"roblox://experiences/start?privateServerLinkCode={code}"
 
-# ====================================================
-# Buka Roblox dengan private server
-# ====================================================
-def join_private_server():
-    print("[INFO] Membuka Private Server...")
-    os.system(f"am start -a android.intent.action.VIEW -d \"{ROBLOX_DEEPLINK}\"")
 
-# ====================================================
-# DETEKSI: Apakah user sedang di server publik?
-# Menggunakan pengecekan log Roblox localstorage.json
-# ====================================================
-def is_in_public_server():
-    roblox_path = "/sdcard/Android/data/com.roblox.client/files/logs/"
-
-    try:
-        files = os.listdir(roblox_path)
-        target = None
-
-        # ambil file log terbaru
-        for f in sorted(files, reverse=True):
-            if "Player" in f:
-                target = f
-                break
-
-        if not target:
-            return False
-
-        with open(roblox_path + target, "r", errors="ignore") as f:
-            content = f.read()
-
-        # Jika PrivateServerLinkCode tidak ada, berarti user di public server
-        if PRIVATE_SERVER_CODE not in content:
-            return True
-
-        return False
-
-    except Exception:
-        return False
-
-# ====================================================
-# DETEKSI: Roblox ditutup / crash
-# Termux method: cek proses com.roblox.client di android
-# ====================================================
-def is_roblox_running():
+# ============================================
+# Cek apakah Roblox berjalan
+# ============================================
+def roblox_running():
     out = os.popen("pidof com.roblox.client").read()
     return out.strip() != ""
 
-# ====================================================
+
+# ============================================
 # Matikan Roblox
-# ====================================================
+# ============================================
 def kill_roblox():
     os.system("am force-stop com.roblox.client")
 
-# ====================================================
-# MODE PANTAU
-# ====================================================
+
+# ============================================
+# FORCE REJOIN ROBLOX PRIVATE SERVER
+# ============================================
+def full_force_rejoin():
+
+    print("[ACTION] Membuka Roblox App...")
+    os.system("am start -n com.roblox.client/com.roblox.client.Activity")
+
+    time.sleep(4)  # WAJIB beri waktu untuk initializing
+
+    print("[ACTION] Mengirim DeepLink Private Server...")
+    os.system(f"am start -a android.intent.action.VIEW -d \"{DEEPLINK}\"")
+
+    # Deep link kedua (lebih akurat)
+    time.sleep(3)
+    print("[ACTION] DeepLink kedua (jamin berhasil)...")
+    os.system(f"am start -a android.intent.action.VIEW -d \"{DEEPLINK}\"")
+
+    # Loop sampai Roblox benar-benar berjalan
+    for i in range(10):
+        if roblox_running():
+            print("[INFO] Roblox berhasil launch, menunggu load...")
+            break
+        time.sleep(1)
+
+    time.sleep(3)
+    print("[INFO] Rejoin attempt selesai.\n")
+
+
+# ============================================
+# DETEKSI SERVER PUBLIC VIA LOGS
+# ============================================
+def is_public_server():
+    logpath = "/sdcard/Android/data/com.roblox.client/files/logs/"
+    try:
+        files = os.listdir(logpath)
+        files = sorted(files, reverse=True)
+        for f in files:
+            if "Player" in f:
+                target = f
+                break
+        else:
+            return False
+
+        content = open(logpath + target, "r", errors="ignore").read()
+        return PRIVATE_CODE not in content
+
+    except:
+        return False
+
+
+# ============================================
+# MAIN MONITOR
+# ============================================
 def monitor():
-    print("[SYSTEM] Auto Rejoin dimulai...")
-    last_running = False
+    print("[SYSTEM] Monitoring dimulai...\n")
+    last_state = False
 
     while True:
-        running = is_roblox_running()
+        active = roblox_running()
 
-        # Roblox sebelumnya berjalan → sekarang tidak → reconnect
-        if last_running and not running:
-            print("[DETECT] Roblox crash/disconnect!")
+        # Roblox baru crash / keluar
+        if last_state and not active:
+            print("[DETECT] Roblox crash / force exit.")
             time.sleep(2)
-            join_private_server()
+            full_force_rejoin()
 
         # Roblox hidup tapi user pindah ke server publik
-        if running:
-            if is_in_public_server():
-                print("[DETECT] Kamu dipindah ke SERVER PUBLIK!")
-                print("[ACTION] Restart & Rejoin ke Private Server")
+        if active and is_public_server():
+            print("[DETECT] Kamu dipindah ke SERVER PUBLIK!")
+            print("[ACTION] Restart Roblox dan Rejoin...")
+            kill_roblox()
+            time.sleep(2)
+            full_force_rejoin()
 
-                kill_roblox()
-                time.sleep(2)
-                join_private_server()
-
-        last_running = running
+        last_state = active
         time.sleep(2)
 
-# ====================================================
-# MAIN
-# ====================================================
-if __name__ == "__main__":
-    print("[INFO] Mengambil Private Server Link Code...")
-    PRIVATE_SERVER_CODE = extract_private_server_code(PRIVATE_SERVER_LINK)
 
-    if not PRIVATE_SERVER_CODE:
-        print("[ERROR] Kode Private Server gagal dibaca!")
+# ============================================
+# MAIN PROGRAM
+# ============================================
+if __name__ == "__main__":
+    PRIVATE_CODE = extract_ps_code(PRIVATE_SERVER_LINK)
+    if not PRIVATE_CODE:
+        print("[ERROR] Private server code tidak ditemukan!")
         exit()
 
-    ROBLOX_DEEPLINK = build_roblox_deeplink(PRIVATE_SERVER_CODE)
-    print(f"[INFO] DeepLink Roblox OK: {ROBLOX_DEEPLINK}")
+    DEEPLINK = build_deeplink(PRIVATE_CODE)
+    print("[INFO] DeepLink:", DEEPLINK)
 
-    # Pertama kali langsung masuk
-    join_private_server()
+    # pertama kali langsung force-rejoin
+    full_force_rejoin()
 
-    # Mulai monitoring
+    # mulai monitoring auto rejoin
     monitor()
