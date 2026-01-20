@@ -1,165 +1,109 @@
-import os
-import time
 import subprocess
-import platform
+import time
+import psutil
 import re
-from datetime import datetime
-import pathlib
+import webbrowser
 
-# ============================================================
-# CONFIG
-# ============================================================
+# ==========================================
+# MASUKKAN LINK PRIVATE SERVER KAMU DI SINI
+# ==========================================
 PRIVATE_SERVER_LINK = "https://www.roblox.com/share?code=818a0e6bdeb0ca49a0fbfbdfb9453cf6&type=Server"
-CHECK_INTERVAL = 8          # detik
-ANDROID_PACKAGE = "com.roblox.client"
 
-# ============================================================
-# LOGGING
-# ============================================================
-def log(msg):
-    now = datetime.now().strftime("%H:%M:%S")
-    print(f"[{now}] {msg}")
+# ==========================================
+# FUNGSI: Ambil kode Private Server dari URL
+# ==========================================
+def extract_private_server_code(url):
+    m = re.search(r'code=([A-Za-z0-9]+)', url)
+    return m.group(1) if m else None
 
-# ============================================================
-# DETEKSI GAME ID (SERVER)
-# ============================================================
-def get_roblox_log_path():
-    base = pathlib.Path(os.getenv("LOCALAPPDATA", ""))
-    log_dir = base / "Roblox" / "logs"
+# ==========================================
+# KONVERSI LINK SHARE MENJADI roblox://
+# ==========================================
+def build_roblox_deeplink(code):
+    # Link resmi format baru Roblox
+    return f"roblox://experiences/start?privateServerLinkCode={code}"
 
-    if not log_dir.exists():
-        return None
+# ==========================================
+# FUNGSI: Buka Private Server
+# ==========================================
+def join_private_server():
+    print("[INFO] Membuka Private Server...")
+    webbrowser.open(ROBLOX_DEEPLINK)
 
-    files = list(log_dir.glob("*.log"))
-    if not files:
-        return None
+# ==========================================
+# CEK apakah Roblox sedang berjalan
+# ==========================================
+def is_roblox_running():
+    for p in psutil.process_iter(attrs=['name']):
+        try:
+            if "RobloxPlayer" in p.info['name'] or "RobloxPlayerBeta" in p.info['name']:
+                return True
+        except:
+            pass
+    return False
 
-    newest = max(files, key=lambda f: f.stat().st_mtime)
-    return str(newest)
+# ==========================================
+# CEK apakah user masuk Server Publik
+# (mendeteksi "RobloxCrashHandler" atau "RobloxPlayerBeta" restart)
+# ==========================================
+def detect_public_server():
+    # Metode sederhana: Roblox restart dalam <10 detik = biasanya pindah server
+    # Kamu bisa tambah metode lain jika ingin lebih akurat.
+    return False  # placeholder bila tidak ingin deteksi tambahan
 
-
-def extract_game_id():
-    path = get_roblox_log_path()
-    if not path:
-        return None
-
-    try:
-        with open(path, "r", errors="ignore") as f:
-            text = f.read()
-    except:
-        return None
-
-    match = re.findall(r"GameId: ([0-9a-fA-F\-]+)", text)
-    if match:
-        return match[-1]  # ambil yang terbaru
-    return None
-
-
-# ============================================================
-# ANDROID MODE (ROOT)
-# ============================================================
-def android_is_running():
-    try:
-        result = subprocess.check_output(["su", "-c", f"pidof {ANDROID_PACKAGE}"], stderr=subprocess.STDOUT)
-        return True if result else False
-    except:
-        return False
-
-
-def android_force_stop():
-    log("🔴 Menutup Roblox...")
-    os.system(f"su -c 'am force-stop {ANDROID_PACKAGE}'")
-    time.sleep(2)
-
-
-def android_open_ps():
-    log("🟢 Membuka Private Server...")
-    os.system(f"su -c \"am start -a android.intent.action.VIEW -d '{PRIVATE_SERVER_LINK}' -p {ANDROID_PACKAGE}\"")
-    time.sleep(10)
-
-
-# ============================================================
-# WINDOWS MODE
-# ============================================================
-def windows_is_running():
-    try:
-        output = subprocess.check_output("tasklist", shell=True).decode().lower()
-        return "robloxplayerbeta.exe" in output
-    except:
-        return False
-
-
-def windows_force_stop():
-    log("🔴 Menutup Roblox...")
-    os.system("taskkill /F /IM RobloxPlayerBeta.exe >nul 2>&1")
-    time.sleep(2)
-
-
-def windows_open_ps():
-    log("🟢 Membuka Private Server...")
-    os.system(f'start "" "{PRIVATE_SERVER_LINK}"')
-    time.sleep(10)
-
-
-# ============================================================
-# MAIN LOOP
-# ============================================================
-def main():
-    system = platform.system().lower()
-
-    if "windows" in system:
-        mode = "windows"
-        log("💻 Mode terdeteksi: WINDOWS")
-    elif "linux" in system or "android" in system:
-        mode = "android"
-        log("📱 Mode terdeteksi: ANDROID / EMULATOR ROOT")
-    else:
-        log("❌ Device tidak didukung.")
-        return
-
-    log("=== AUTO REJOIN + PUBLIC SERVER DETECT (NO COOKIE) ===")
-    log(f"🔗 PS Link: {PRIVATE_SERVER_LINK}\n")
-
-    # buka PS pertama kali
-    if mode == "android":
-        android_open_ps()
-    else:
-        windows_open_ps()
-
-    last_game_id = None
+# ==========================================
+# FUNGSI: Pantau Roblox
+# ==========================================
+def monitor():
+    print("[SYSTEM] Auto Rejoin dimulai.")
+    roblox_was_running = False
 
     while True:
-        # cek apakah Roblox berjalan
-        running = android_is_running() if mode == "android" else windows_is_running()
+        running = is_roblox_running()
 
-        # cek gameId (khusus Windows)
-        game_id = extract_game_id() if mode == "windows" else None
+        # Roblox sebelumnya aktif → sekarang tidak → otomatis reconnect
+        if roblox_was_running and not running:
+            print("[DETECT] Roblox disconnect / crash / pindah server.")
+            time.sleep(2)
+            join_private_server()
 
-        if running:
-            log("🟢 Roblox berjalan.")
-        else:
-            log("🔴 Roblox tidak berjalan → rejoin...")
-            if mode == "android":
-                android_force_stop()
-                android_open_ps()
-            else:
-                windows_force_stop()
-                windows_open_ps()
-            time.sleep(CHECK_INTERVAL)
-            continue
+        # Roblox sedang jalan tapi kamu pindah ke server publik → auto rejoin
+        if running and detect_public_server():
+            print("[DETECT] Pindah ke server publik. Memaksa rejoin...")
+            kill_roblox()
+            time.sleep(2)
+            join_private_server()
 
-        # DETEKSI PINDAH SERVER (HANYA WINDOWS)
-        if mode == "windows":
-            if game_id and last_game_id and game_id != last_game_id:
-                log("⚠️ Server berubah → kemungkinan pindah ke publik!")
-                windows_force_stop()
-                windows_open_ps()
+        roblox_was_running = running
+        time.sleep(1)
 
-        if game_id:
-            last_game_id = game_id
+# ==========================================
+# MATIKAN ROBLOX
+# ==========================================
+def kill_roblox():
+    for p in psutil.process_iter():
+        try:
+            if "RobloxPlayer" in p.name() or "RobloxPlayerBeta" in p.name():
+                p.kill()
+        except:
+            pass
 
-        time.sleep(CHECK_INTERVAL)
-
-
+# ==========================================
+# MAIN
+# ==========================================
 if __name__ == "__main__":
-    main()
+    print("[INFO] Mengambil Private Server Link Code...")
+    code = extract_private_server_code(PRIVATE_SERVER_LINK)
+
+    if not code:
+        print("[ERROR] Kode Private Server gagal ditemukan!")
+        exit()
+
+    ROBLOX_DEEPLINK = build_roblox_deeplink(code)
+    print(f"[INFO] DeepLink Roblox: {ROBLOX_DEEPLINK}")
+
+    # pertama kali langsung join
+    join_private_server()
+
+    # mulai mode pantau
+    monitor()
