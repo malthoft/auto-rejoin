@@ -195,7 +195,7 @@ def update_config_with_cookie(cookie_value):
                 config = json.load(f)
         else:
             config = {
-                "ps_link": "https://www.roblox.com/share?code=YOUR_CODE&type=Server",
+                "ps_link": "https://www.roblox.com/share?code=818a0e6bdeb0ca49a0fbfbdfb9453cf6&type=Server",
                 "user_id": 0,
                 "check_interval": 10,
                 "restart_delay": 30
